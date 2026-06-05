@@ -1,0 +1,211 @@
+version: '3.9'
+
+services:
+  # ─── Infrastructure ──────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: safestream-postgres
+    environment:
+      POSTGRES_DB: safestream
+      POSTGRES_USER: safestream
+      POSTGRES_PASSWORD: safestream
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U safestream']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: safestream-redis
+    ports:
+      - '6379:6379'
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: safestream-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: safestream
+      RABBITMQ_DEFAULT_PASS: safestream
+    ports:
+      - '5672:5672'
+      - '15672:15672'    # Management UI → localhost:15672
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ['CMD', 'rabbitmq-diagnostics', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  elasticsearch:
+    image: elasticsearch:8.13.2
+    container_name: safestream-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - 'ES_JAVA_OPTS=-Xms512m -Xmx512m'
+    ports:
+      - '9200:9200'
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -f http://localhost:9200/_cluster/health']
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    container_name: safestream-minio
+    command: server /data --console-address ':9001'
+    environment:
+      MINIO_ROOT_USER: safestream
+      MINIO_ROOT_PASSWORD: safestream123
+    ports:
+      - '9000:9000'
+      - '9001:9001'   # Console → localhost:9001
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:9000/minio/health/live']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24-alpine
+    container_name: safestream-clickhouse
+    ports:
+      - '8123:8123'   # HTTP API
+      - '9009:9009'   # Native protocol
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+
+  # ─── Services ────────────────────────────────────────────────
+  auth-service:
+    build:
+      context: .
+      dockerfile: services/auth-service/Dockerfile
+    container_name: safestream-auth
+    environment:
+      NODE_ENV: development
+      APP_PORT: 3001
+      DATABASE_URL: postgresql://safestream:safestream@postgres:5432/safestream
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://safestream:safestream@rabbitmq:5672
+      JWT_ACCESS_SECRET: dev-access-secret-change-in-prod-min-32-chars
+      JWT_REFRESH_SECRET: dev-refresh-secret-change-in-prod-min-32-chars
+    ports:
+      - '3001:3001'
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+    restart: unless-stopped
+
+  video-service:
+    build:
+      context: .
+      dockerfile: services/video-service/Dockerfile
+    container_name: safestream-video
+    environment:
+      NODE_ENV: development
+      APP_PORT: 3002
+      DATABASE_URL: postgresql://safestream:safestream@postgres:5432/safestream
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://safestream:safestream@rabbitmq:5672
+      AWS_S3_BUCKET: safestream-videos
+      AWS_REGION: us-east-1
+      # For local dev, point to MinIO:
+      # AWS_ENDPOINT: http://minio:9000
+    ports:
+      - '3002:3002'
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+    restart: unless-stopped
+
+  messenger-service:
+    build:
+      context: .
+      dockerfile: services/messenger-service/Dockerfile
+    container_name: safestream-messenger
+    environment:
+      NODE_ENV: development
+      APP_PORT: 3005
+      DATABASE_URL: postgresql://safestream:safestream@postgres:5432/safestream
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://safestream:safestream@rabbitmq:5672
+      JWT_ACCESS_SECRET: dev-access-secret-change-in-prod-min-32-chars
+    ports:
+      - '3005:3005'
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_healthy }
+    restart: unless-stopped
+
+  transcoding-worker:
+    build:
+      context: .
+      dockerfile: workers/transcoding-worker/Dockerfile
+    container_name: safestream-transcoder
+    environment:
+      DATABASE_URL: postgresql://safestream:safestream@postgres:5432/safestream
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://safestream:safestream@rabbitmq:5672
+    depends_on:
+      postgres: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+    restart: unless-stopped
+
+  # ─── Monitoring ───────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.51.2
+    container_name: safestream-prometheus
+    volumes:
+      - ./infrastructure/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - '9090:9090'
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+
+  grafana:
+    image: grafana/grafana:10.4.2
+    container_name: safestream-grafana
+    ports:
+      - '3010:3000'   # → localhost:3010
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+
+volumes:
+  postgres_data:
+  redis_data:
+  rabbitmq_data:
+  elasticsearch_data:
+  minio_data:
+  clickhouse_data:
+  grafana_data:

@@ -1,0 +1,12 @@
+{
+  "name": "@safestream/auth",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "dependencies": {
+    "@nestjs/common": "^10.3.0",
+    "@nestjs/jwt": "^10.2.0",
+    "@nestjs/passport": "^10.0.3",
+    "passport": "^0.7.0",
+    "passport-jwt": "^4.0.1"
+  }
+}

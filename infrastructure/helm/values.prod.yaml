@@ -1,0 +1,27 @@
+global:
+  nodeEnv: production
+  ecrRegistry: 123456789.dkr.ecr.us-east-1.amazonaws.com
+  image:
+    tag: latest
+
+namespace: safestream-prod
+
+authService:
+  replicas: 3
+  minReplicas: 3
+  maxReplicas: 20
+
+videoService:
+  replicas: 5
+  minReplicas: 3
+  maxReplicas: 30
+
+messengerService:
+  replicas: 3
+  minReplicas: 2
+  maxReplicas: 15
+
+transcodingWorker:
+  replicas: 10
+  minReplicas: 5
+  maxReplicas: 50

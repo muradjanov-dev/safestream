@@ -1,0 +1,14 @@
+{
+  "name": "@safestream/logger",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@nestjs/common": "^10.3.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5"
+  }
+}

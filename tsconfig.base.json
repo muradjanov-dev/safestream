@@ -1,0 +1,34 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "paths": {
+      "@safestream/database": ["./shared/libs/database/src/index.ts"],
+      "@safestream/redis": ["./shared/libs/redis/src/index.ts"],
+      "@safestream/auth": ["./shared/libs/auth/src/index.ts"],
+      "@safestream/events": ["./shared/libs/events/src/index.ts"],
+      "@safestream/exceptions": ["./shared/libs/exceptions/src/index.ts"],
+      "@safestream/pagination": ["./shared/libs/pagination/src/index.ts"],
+      "@safestream/storage": ["./shared/libs/storage/src/index.ts"],
+      "@safestream/logger": ["./shared/libs/logger/src/index.ts"]
+    }
+  }
+}

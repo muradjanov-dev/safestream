@@ -1,0 +1,46 @@
+{
+  "name": "@safestream/video-service",
+  "version": "1.0.0",
+  "scripts": {
+    "build": "nest build",
+    "dev": "nest start --watch",
+    "start": "node dist/main",
+    "test": "jest",
+    "lint": "eslint src --ext .ts"
+  },
+  "dependencies": {
+    "@aws-sdk/client-rekognition": "^3.575.0",
+    "@aws-sdk/client-s3": "^3.575.0",
+    "@aws-sdk/s3-request-presigner": "^3.575.0",
+    "@golevelup/nestjs-rabbitmq": "^5.3.0",
+    "@nestjs/common": "^10.3.0",
+    "@nestjs/config": "^3.2.0",
+    "@nestjs/core": "^10.3.0",
+    "@nestjs/platform-express": "^10.3.0",
+    "@nestjs/throttler": "^5.1.2",
+    "@nestjs/typeorm": "^10.0.2",
+    "@safestream/auth": "workspace:*",
+    "@safestream/database": "workspace:*",
+    "@safestream/events": "workspace:*",
+    "@safestream/exceptions": "workspace:*",
+    "@safestream/logger": "workspace:*",
+    "@safestream/pagination": "workspace:*",
+    "@safestream/redis": "workspace:*",
+    "@safestream/storage": "workspace:*",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.14.1",
+    "helmet": "^7.1.0",
+    "multer": "^1.4.5-lts.1",
+    "pg": "^8.11.5",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1",
+    "typeorm": "^0.3.20",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^10.3.2",
+    "@types/multer": "^1.4.11",
+    "@types/node": "^20.12.7",
+    "typescript": "^5.4.5"
+  }
+}
