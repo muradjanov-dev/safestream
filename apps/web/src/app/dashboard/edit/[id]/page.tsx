@@ -4,6 +4,8 @@ import { use, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { MainLayout } from '@/components/layout/main-layout';
 import { getUploadedVideos, updateUploadedVideo, deleteUploadedVideo, type Video } from '@/lib/api/client';
+import { useFirestore } from '@/lib/firestore';
+import { getVideoDoc, updateVideoDoc, deleteVideoDoc } from '@/lib/data/firestore-data';
 import { Button } from '@/components/ui/button';
 
 export default function EditVideoPage({ params }: { params: Promise<{ id: string }> }) {
@@ -16,24 +18,30 @@ export default function EditVideoPage({ params }: { params: Promise<{ id: string
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    const v = getUploadedVideos().find((x) => x.id === id) ?? null;
-    setVideo(v);
-    if (v) { setTitle(v.title); setDescription(v.description ?? ''); setTags(v.tags.join(', ')); }
+    const load = async () => {
+      const v = useFirestore
+        ? await getVideoDoc(id)
+        : (getUploadedVideos().find((x) => x.id === id) ?? null);
+      setVideo(v);
+      if (v) { setTitle(v.title); setDescription(v.description ?? ''); setTags(v.tags.join(', ')); }
+    };
+    void load();
   }, [id]);
 
   const save = () => {
-    updateUploadedVideo(id, {
+    const patch = {
       title: title.trim(),
       description: description.trim(),
       tags: tags.split(',').map((t) => t.trim()).filter(Boolean),
-    });
+    };
+    if (useFirestore) void updateVideoDoc(id, patch); else updateUploadedVideo(id, patch);
     setSaved(true);
     setTimeout(() => router.push('/dashboard'), 800);
   };
 
   const remove = () => {
     if (confirm('Delete this video? This cannot be undone.')) {
-      deleteUploadedVideo(id);
+      if (useFirestore) void deleteVideoDoc(id); else deleteUploadedVideo(id);
       router.push('/dashboard');
     }
   };

@@ -29,17 +29,20 @@ export function VideoPlayer({ videoId }: Props) {
     if (!videoRef.current || !video?.hlsManifestUrl) return;
 
     const el = videoRef.current;
+    const url = video.hlsManifestUrl;
+    const isHls = url.includes('.m3u8');
 
-    if (Hls.isSupported()) {
+    if (isHls && Hls.isSupported()) {
       const hls = new Hls({ enableWorker: true, lowLatencyMode: false });
       hlsRef.current = hls;
-      hls.loadSource(video.hlsManifestUrl);
+      hls.loadSource(url);
       hls.attachMedia(el);
       hls.on(Hls.Events.ERROR, (_e, data) => {
         if (data.fatal) setError(true);
       });
-    } else if (el.canPlayType('application/vnd.apple.mpegurl')) {
-      el.src = video.hlsManifestUrl;
+    } else {
+      // Direct file (mp4/webm from Firebase Storage) or native HLS (Safari)
+      el.src = url;
     }
 
     return () => {

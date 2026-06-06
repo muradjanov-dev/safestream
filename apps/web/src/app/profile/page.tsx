@@ -7,7 +7,7 @@ import { MainLayout } from '@/components/layout/main-layout';
 import { VideoGrid } from '@/components/feed/video-grid';
 import { useAuthStore } from '@/stores/auth.store';
 import { useInteractionsStore } from '@/stores/interactions.store';
-import { getUploadedVideos, type Video } from '@/lib/api/client';
+import { videosApi, type Video } from '@/lib/api/client';
 import { Button } from '@/components/ui/button';
 
 export default function ProfilePage() {
@@ -21,7 +21,7 @@ export default function ProfilePage() {
   }, [user, router]);
 
   useEffect(() => {
-    setUploads(getUploadedVideos());
+    void videosApi.mine().then((r) => setUploads(r.items));
   }, []);
 
   if (!user) return null;

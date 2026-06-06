@@ -4,6 +4,9 @@ import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { conversationsApi, appendMessage, type Message } from '@/lib/api/client';
 import { useMessengerStore } from '@/stores/messenger.store';
+import { useAuthStore } from '@/stores/auth.store';
+import { useFirestore } from '@/lib/firestore';
+import { listenMessages, sendFirestoreMessage } from '@/lib/data/firestore-data';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Send, ArrowLeft } from 'lucide-react';
@@ -18,22 +21,31 @@ const REPLIES = [
 ];
 
 export function ChatWindow({ conversationId }: { conversationId: string }) {
+  const { user } = useAuthStore();
   const { messages, setMessages, addMessage, setActiveConversation, conversations } = useMessengerStore();
   const [input, setInput] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const conv = conversations.find((c) => c.id === conversationId);
   const peer = conv?.participants.find((p) => p.id !== 'me') ?? conv?.participants[0];
+  const myId = useFirestore ? (user?.id ?? 'me') : 'me';
 
+  // Local mode: load seeded messages from localStorage
   const { data } = useQuery({
     queryKey: ['messages', conversationId],
     queryFn: () => conversationsApi.messages(conversationId),
-    refetchInterval: false,
+    enabled: !useFirestore,
   });
-
   useEffect(() => {
-    if (data?.items) setMessages(conversationId, data.items);
+    if (!useFirestore && data?.items) setMessages(conversationId, data.items);
   }, [data, conversationId, setMessages]);
+
+  // Firestore mode: real-time listener
+  useEffect(() => {
+    if (!useFirestore) return;
+    const unsub = listenMessages(conversationId, (msgs) => setMessages(conversationId, msgs));
+    return unsub;
+  }, [conversationId, setMessages]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -42,6 +54,16 @@ export function ChatWindow({ conversationId }: { conversationId: string }) {
   const handleSend = () => {
     const text = input.trim();
     if (!text) return;
+    setInput('');
+
+    if (useFirestore) {
+      void sendFirestoreMessage(conversationId, myId, text);
+      setTimeout(() => {
+        void sendFirestoreMessage(conversationId, peer?.id ?? 'peer', REPLIES[Math.floor(Math.random() * REPLIES.length)]);
+      }, 1200);
+      return;
+    }
+
     const mine: Message = {
       id: `${conversationId}-${Date.now()}`,
       conversationId, senderId: 'me', type: 'text', content: text,
@@ -49,9 +71,6 @@ export function ChatWindow({ conversationId }: { conversationId: string }) {
     };
     addMessage(conversationId, mine);
     appendMessage(conversationId, mine);
-    setInput('');
-
-    // Simulate a reply from the other participant
     setTimeout(() => {
       const reply: Message = {
         id: `${conversationId}-${Date.now()}-r`,
@@ -78,10 +97,10 @@ export function ChatWindow({ conversationId }: { conversationId: string }) {
 
       <div className="flex-1 overflow-y-auto p-4 space-y-2">
         {convMessages.map((msg) => (
-          <div key={msg.id} className={cn('flex', msg.senderId === 'me' ? 'justify-end' : 'justify-start')}>
+          <div key={msg.id} className={cn('flex', msg.senderId === myId ? 'justify-end' : 'justify-start')}>
             <div className={cn(
               'max-w-xs lg:max-w-md px-3 py-2 rounded-2xl text-sm',
-              msg.senderId === 'me'
+              msg.senderId === myId
                 ? 'bg-primary text-primary-foreground rounded-br-sm'
                 : 'bg-muted rounded-bl-sm',
             )}>

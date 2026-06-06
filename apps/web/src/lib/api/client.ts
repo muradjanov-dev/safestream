@@ -12,6 +12,8 @@ import {
   getChannelByHandle,
   mockChannels,
 } from '@/lib/mock-data';
+import { useFirestore } from '@/lib/firestore';
+import * as fs from '@/lib/data/firestore-data';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -131,21 +133,32 @@ export function deleteUploadedVideo(id: string) {
   localStorage.setItem(UPLOADS_KEY, JSON.stringify(getUploadedVideos().filter((v) => v.id !== id)));
 }
 
-function withUploads(list: Video[]): Video[] {
-  const uploads = getUploadedVideos();
-  if (!uploads.length) return list;
-  return [...uploads, ...list];
+// Uploaded videos: from Firestore when configured, else localStorage.
+async function mergedUploads(): Promise<Video[]> {
+  if (useFirestore) {
+    try { return await fs.listUploadedVideos(); } catch { return []; }
+  }
+  return getUploadedVideos();
 }
 
 // ── Domain APIs (mock-backed) ─────────────────────────────────────────────────
 
 export const videosApi = {
-  list:     async () => page(withUploads(getVideos())),
+  list:     async () => page([...(await mergedUploads()), ...getVideos()]),
   getOne:   async (id: string) => {
+    if (useFirestore && id.startsWith('up-')) {
+      try { const d = await fs.getVideoDoc(id); if (d) return { success: true, data: d }; } catch { /* fall through */ }
+    }
     const v = getUploadedVideos().find((x) => x.id === id) ?? getVideoById(id);
     return { success: true, data: v as Video };
   },
-  mine:     async () => page(getUploadedVideos()),
+  mine:     async () => {
+    if (useFirestore) {
+      const u = getPersistedUser();
+      if (u) { try { return page(await fs.listMyVideos(u.id)); } catch { /* fall through */ } }
+    }
+    return page(getUploadedVideos());
+  },
   related:  async (id: string) => { await delay(); return page(getRelated(id)); },
   trending: async () => page(getTrending()),
   recordView: async (_id: string, _data?: { watchedSeconds?: number }) => ({ success: true }),
@@ -165,7 +178,7 @@ export const videosApi = {
 };
 
 export const feedApi = {
-  home:          async (_cursor?: string) => { await delay(); return page(withUploads(getVideos())); },
+  home:          async (_cursor?: string) => { await delay(); return page([...(await mergedUploads()), ...getVideos()]); },
   trending:      async () => page(getTrending()),
   shorts:        async () => page(getShorts()),
   subscriptions: async () => page(getVideos().slice(0, 8)),
@@ -208,10 +221,28 @@ function getUserComments(videoId: string): VideoComment[] {
 }
 
 export const commentsApi = {
-  list:   async (videoId: string) => { await delay(); return page([...getUserComments(videoId), ...getComments(videoId)]); },
+  list:   async (videoId: string) => {
+    if (useFirestore) {
+      try {
+        const c = await fs.listComments(videoId);
+        return page(c.length ? c : getComments(videoId));
+      } catch { /* fall through to local */ }
+    }
+    await delay();
+    return page([...getUserComments(videoId), ...getComments(videoId)]);
+  },
   create: async (videoId: string, content: string, parentId?: string) => {
     if (typeof window === 'undefined') return { success: true };
     const user = getPersistedUser();
+    if (useFirestore && user) {
+      try {
+        await fs.addComment(videoId, content, parentId, {
+          id: user.id, username: user.username, email: '', role: 'creator',
+          emailVerified: true, displayName: user.displayName, avatarUrl: user.avatarUrl,
+        });
+        return { success: true };
+      } catch { /* fall through to local */ }
+    }
     const comment: VideoComment = {
       id: `${videoId}-u${Date.now()}`,
       content,

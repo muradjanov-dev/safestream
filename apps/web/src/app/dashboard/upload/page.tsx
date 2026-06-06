@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { saveUploadedVideo, type Video } from '@/lib/api/client';
 import { useAuthStore } from '@/stores/auth.store';
+import { useFirestore } from '@/lib/firestore';
+import { uploadVideoFile } from '@/lib/data/firestore-data';
 import { MainLayout } from '@/components/layout/main-layout';
 
 type Step = 'select' | 'details' | 'uploading' | 'done';
@@ -74,12 +76,27 @@ export default function UploadPage() {
     setProgress(0);
     setError(null);
 
-    // Simulate upload + transcoding progress (no backend — video is stored locally)
+    const tags = form.tags.split(',').map((t) => t.trim()).filter(Boolean);
+
+    try {
+      if (useFirestore) {
+        // Real backend: upload to Storage (or fall back to demo) + save metadata to Firestore
+        const video = await uploadVideoFile(file, { title: form.title.trim(), description: form.description.trim(), tags, videoType: form.videoType }, user, setProgress);
+        setUploadedVideoId(video.id);
+        setStep('done');
+        return;
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Upload failed');
+      setStep('details');
+      return;
+    }
+
+    // Local fallback (no Firebase): simulate upload, store in localStorage
     for (let p = 10; p <= 100; p += 10) {
       await new Promise((r) => setTimeout(r, 180));
       setProgress(p);
     }
-
     const id = 'up-' + Date.now();
     const now = new Date().toISOString();
     const video: Video = {
@@ -98,7 +115,7 @@ export default function UploadPage() {
       status: 'published',
       publishedAt: now,
       createdAt: now,
-      tags: form.tags.split(',').map((t) => t.trim()).filter(Boolean),
+      tags,
       trendingScore: 0,
     };
     saveUploadedVideo(video);
