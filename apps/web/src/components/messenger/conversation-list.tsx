@@ -1,20 +1,25 @@
 'use client';
 
+import { useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useMessengerStore } from '@/stores/messenger.store';
 import { conversationsApi } from '@/lib/api/client';
 import { timeAgo } from '@/lib/utils';
 
 export function ConversationList() {
-  const { activeConversationId, setActiveConversation } = useMessengerStore();
+  const { activeConversationId, setActiveConversation, setConversations } = useMessengerStore();
 
   const { data, isLoading } = useQuery({
     queryKey: ['conversations'],
     queryFn: () => conversationsApi.list(),
-    refetchInterval: 30_000,
+    refetchInterval: false,
   });
 
   const conversations = data?.items ?? [];
+
+  useEffect(() => {
+    if (data?.items) setConversations(data.items);
+  }, [data, setConversations]);
 
   if (isLoading) {
     return (

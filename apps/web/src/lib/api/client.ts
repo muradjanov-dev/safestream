@@ -120,6 +120,17 @@ export function saveUploadedVideo(v: Video) {
   localStorage.setItem(UPLOADS_KEY, JSON.stringify([v, ...all]));
 }
 
+export function updateUploadedVideo(id: string, patch: Partial<Video>) {
+  if (typeof window === 'undefined') return;
+  const all = getUploadedVideos().map((v) => (v.id === id ? { ...v, ...patch } : v));
+  localStorage.setItem(UPLOADS_KEY, JSON.stringify(all));
+}
+
+export function deleteUploadedVideo(id: string) {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(UPLOADS_KEY, JSON.stringify(getUploadedVideos().filter((v) => v.id !== id)));
+}
+
 function withUploads(list: Video[]): Video[] {
   const uploads = getUploadedVideos();
   if (!uploads.length) return list;
@@ -198,7 +209,7 @@ function getUserComments(videoId: string): VideoComment[] {
 
 export const commentsApi = {
   list:   async (videoId: string) => { await delay(); return page([...getUserComments(videoId), ...getComments(videoId)]); },
-  create: async (videoId: string, content: string) => {
+  create: async (videoId: string, content: string, parentId?: string) => {
     if (typeof window === 'undefined') return { success: true };
     const user = getPersistedUser();
     const comment: VideoComment = {
@@ -206,6 +217,7 @@ export const commentsApi = {
       content,
       userId: user?.id ?? 'you',
       videoId,
+      parentId,
       likeCount: 0,
       replyCount: 0,
       isPinned: false,
@@ -225,8 +237,75 @@ export const commentsApi = {
   delete: async (_id?: string) => ({ success: true }),
 };
 
+// ── Messenger (local, no backend) ─────────────────────────────────────────────
+
+const MESSAGES_KEY = 'safestream-messages';
+
+const MOCK_CONVERSATIONS: Conversation[] = [
+  {
+    id: 'conv-alice', type: 'direct', currentUserId: 'me',
+    participants: [
+      { id: 'me', username: 'you', displayName: 'You', avatarUrl: null },
+      { id: 'ch-alice', username: 'alice_edu', displayName: 'AliceLearn', avatarUrl: mockChannels[0].avatarUrl ?? null, isOnline: true },
+    ],
+    lastMessage: { content: 'Thanks for subscribing! 🎉', createdAt: new Date(Date.now() - 3600000).toISOString() },
+  },
+  {
+    id: 'conv-bob', type: 'direct', currentUserId: 'me',
+    participants: [
+      { id: 'me', username: 'you', displayName: 'You', avatarUrl: null },
+      { id: 'ch-bob', username: 'bob_science', displayName: "Bob's Science Lab", avatarUrl: mockChannels[1].avatarUrl ?? null, isOnline: false },
+    ],
+    lastMessage: { content: 'Glad you liked the vaccine video!', createdAt: new Date(Date.now() - 86400000).toISOString() },
+  },
+  {
+    id: 'conv-nature', type: 'direct', currentUserId: 'me',
+    participants: [
+      { id: 'me', username: 'you', displayName: 'You', avatarUrl: null },
+      { id: 'ch-nature', username: 'naturexplore', displayName: 'Nature & Wildlife Explorer', avatarUrl: mockChannels[4].avatarUrl ?? null, isOnline: true },
+    ],
+    lastMessage: { content: 'New rainforest series coming soon 🌿', createdAt: new Date(Date.now() - 2 * 86400000).toISOString() },
+  },
+];
+
+const CONV_PEER: Record<string, { id: string; greeting: string }> = {
+  'conv-alice':  { id: 'ch-alice',  greeting: 'Hi there! Thanks for subscribing to AliceLearn 🎉 Any topics you’d like us to cover?' },
+  'conv-bob':    { id: 'ch-bob',    greeting: 'Hey! Glad you’re enjoying the science videos. Got any questions?' },
+  'conv-nature': { id: 'ch-nature', greeting: 'Welcome! 🌿 We post new wildlife docs every week.' },
+};
+
+function readMessageStore(): Record<string, Message[]> {
+  if (typeof window === 'undefined') return {};
+  try { return JSON.parse(localStorage.getItem(MESSAGES_KEY) ?? '{}'); } catch { return {}; }
+}
+function writeMessageStore(all: Record<string, Message[]>) {
+  if (typeof window !== 'undefined') localStorage.setItem(MESSAGES_KEY, JSON.stringify(all));
+}
+
+export function getStoredMessages(conversationId: string): Message[] {
+  const all = readMessageStore();
+  if (!all[conversationId]) {
+    const peer = CONV_PEER[conversationId];
+    all[conversationId] = peer
+      ? [{
+          id: `${conversationId}-seed`, conversationId, senderId: peer.id, type: 'text',
+          content: peer.greeting, isEdited: false, isDeleted: false,
+          createdAt: new Date(Date.now() - 3600000).toISOString(),
+        }]
+      : [];
+    writeMessageStore(all);
+  }
+  return all[conversationId];
+}
+
+export function appendMessage(conversationId: string, message: Message) {
+  const all = readMessageStore();
+  all[conversationId] = [...(all[conversationId] ?? []), message];
+  writeMessageStore(all);
+}
+
 export const conversationsApi = {
-  list:     async () => page<Conversation>([]),
-  create:   async (_data?: unknown) => ({ success: true, data: {} as Conversation }),
-  messages: async (_conversationId?: string) => page<Message>([]),
+  list:     async () => page<Conversation>(MOCK_CONVERSATIONS),
+  create:   async (_data?: unknown) => ({ success: true, data: MOCK_CONVERSATIONS[0] }),
+  messages: async (conversationId: string) => { await delay(); return page<Message>(getStoredMessages(conversationId)); },
 };
