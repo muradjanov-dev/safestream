@@ -9,7 +9,7 @@ let socket: Socket | null = null;
 
 export function getSocket(): Socket {
   if (!socket) {
-    const token = useAuthStore.getState().accessToken;
+    const token = useAuthStore.getState().user?.id ?? '';
     socket = io(`${WS_URL}/messenger`, {
       auth: { token },
       transports: ['websocket'],

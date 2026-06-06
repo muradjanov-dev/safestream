@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
 import { useQuery } from '@tanstack/react-query';
 import { videosApi } from '@/lib/api/client';
+import { useInteractionsStore } from '@/stores/interactions.store';
 
 interface Props { videoId: string }
 
@@ -11,6 +12,7 @@ export function VideoPlayer({ videoId }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
   const [error, setError] = useState(false);
+  const addHistory = useInteractionsStore((s) => s.addHistory);
 
   const { data } = useQuery({
     queryKey: ['video', videoId],
@@ -18,6 +20,10 @@ export function VideoPlayer({ videoId }: Props) {
   });
 
   const video = data?.data;
+
+  useEffect(() => {
+    addHistory(videoId);
+  }, [videoId, addHistory]);
 
   useEffect(() => {
     if (!videoRef.current || !video?.hlsManifestUrl) return;

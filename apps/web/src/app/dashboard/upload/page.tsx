@@ -1,8 +1,9 @@
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { videosApi } from '@/lib/api/client';
+import { saveUploadedVideo, type Video } from '@/lib/api/client';
+import { useAuthStore } from '@/stores/auth.store';
 import { MainLayout } from '@/components/layout/main-layout';
 
 type Step = 'select' | 'details' | 'uploading' | 'done';
@@ -15,11 +16,16 @@ interface UploadForm {
   videoType: 'video' | 'short';
 }
 
-const CHUNK_SIZE = 10 * 1024 * 1024; // 10 MB
+const DEMO_HLS = 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8';
 
 export default function UploadPage() {
   const router = useRouter();
+  const { user } = useAuthStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!user) router.replace('/login');
+  }, [user, router]);
 
   const [step, setStep] = useState<Step>('select');
   const [file, setFile] = useState<File | null>(null);
@@ -63,54 +69,41 @@ export default function UploadPage() {
   }, []);
 
   const handleSubmit = async () => {
-    if (!file || !form.title.trim()) return;
+    if (!file || !form.title.trim() || !user) return;
     setStep('uploading');
     setProgress(0);
     setError(null);
 
-    try {
-      // 1. Initialize multipart upload
-      const { uploadId, videoId, presignedUrls } = await videosApi.initUpload({
-        fileName: file.name,
-        fileSize: file.size,
-        mimeType: file.type,
-        title: form.title.trim(),
-        description: form.description.trim(),
-        tags: form.tags.split(',').map((t) => t.trim()).filter(Boolean),
-        visibility: form.visibility,
-        videoType: form.videoType,
-      });
-
-      // 2. Upload chunks
-      const totalChunks = presignedUrls.length;
-      const parts: { partNumber: number; etag: string }[] = [];
-
-      for (let i = 0; i < totalChunks; i++) {
-        const start = i * CHUNK_SIZE;
-        const end = Math.min(start + CHUNK_SIZE, file.size);
-        const chunk = file.slice(start, end);
-
-        const resp = await fetch(presignedUrls[i], {
-          method: 'PUT',
-          body: chunk,
-          headers: { 'Content-Type': file.type },
-        });
-
-        if (!resp.ok) throw new Error(`Chunk ${i + 1} upload failed`);
-        const etag = resp.headers.get('ETag') ?? '';
-        parts.push({ partNumber: i + 1, etag });
-        setProgress(Math.round(((i + 1) / totalChunks) * 90));
-      }
-
-      // 3. Complete upload
-      await videosApi.completeUpload({ videoId, uploadId, parts });
-      setProgress(100);
-      setUploadedVideoId(videoId);
-      setStep('done');
-    } catch (err: any) {
-      setError(err?.message ?? 'Upload failed. Please try again.');
-      setStep('details');
+    // Simulate upload + transcoding progress (no backend — video is stored locally)
+    for (let p = 10; p <= 100; p += 10) {
+      await new Promise((r) => setTimeout(r, 180));
+      setProgress(p);
     }
+
+    const id = 'up-' + Date.now();
+    const now = new Date().toISOString();
+    const video: Video = {
+      id,
+      title: form.title.trim(),
+      description: form.description.trim(),
+      thumbnailUrl: `https://picsum.photos/seed/${id}/640/360`,
+      hlsManifestUrl: DEMO_HLS,
+      durationSeconds: 0,
+      viewCount: 0,
+      likeCount: 0,
+      commentCount: 0,
+      channelId: user.id,
+      channel: { id: user.id, name: user.displayName ?? user.username, handle: user.username, avatarUrl: user.avatarUrl },
+      videoType: form.videoType,
+      status: 'published',
+      publishedAt: now,
+      createdAt: now,
+      tags: form.tags.split(',').map((t) => t.trim()).filter(Boolean),
+      trendingScore: 0,
+    };
+    saveUploadedVideo(video);
+    setUploadedVideoId(id);
+    setStep('done');
   };
 
   return (

@@ -79,7 +79,7 @@ export function Navbar() {
                 )}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
-                  onClick={() => { void logout(); router.push('/auth/login'); }}
+                  onClick={() => { void logout(); router.push('/login'); }}
                   className="text-destructive"
                 >
                   <LogOut className="mr-2 h-4 w-4" />Sign out
@@ -89,10 +89,10 @@ export function Navbar() {
           </>
         ) : (
           <div className="flex gap-2">
-            <Link href="/auth/login" className={cn('inline-flex items-center px-3 h-9 rounded-md text-sm font-medium hover:bg-accent transition-colors')}>
+            <Link href="/login" className={cn('inline-flex items-center px-3 h-9 rounded-md text-sm font-medium hover:bg-accent transition-colors')}>
               Sign in
             </Link>
-            <Link href="/auth/register" className="inline-flex items-center px-3 h-9 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors">
+            <Link href="/register" className="inline-flex items-center px-3 h-9 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors">
               Sign up
             </Link>
           </div>

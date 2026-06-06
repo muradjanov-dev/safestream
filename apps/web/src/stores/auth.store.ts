@@ -1,7 +1,16 @@
+'use client';
+
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import {
+  signInWithPopup,
+  signOut as fbSignOut,
+  onAuthStateChanged,
+  type User as FirebaseUser,
+} from 'firebase/auth';
+import { getFirebaseAuth, googleProvider, isFirebaseConfigured } from '@/lib/firebase';
 
-interface User {
+export interface User {
   id: string;
   username: string;
   email: string;
@@ -13,98 +22,102 @@ interface User {
 
 interface AuthState {
   user: User | null;
-  accessToken: string | null;
   isLoading: boolean;
   error: string | null;
-  login: (email: string, password: string, mfaCode?: string) => Promise<void>;
-  register: (data: { username: string; email: string; password: string; displayName?: string }) => Promise<void>;
+  signInWithGoogle: () => Promise<void>;
+  signInDemo: () => void;
   logout: () => Promise<void>;
-  refreshTokens: () => Promise<boolean>;
-  setUser: (user: User) => void;
+  initAuth: () => void;
   clearError: () => void;
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api/v1';
+function mapFirebaseUser(fb: FirebaseUser): User {
+  return {
+    id: fb.uid,
+    email: fb.email ?? '',
+    username: (fb.email?.split('@')[0] ?? fb.displayName ?? 'user').replace(/[^a-z0-9_]/gi, '_').toLowerCase(),
+    displayName: fb.displayName ?? undefined,
+    avatarUrl: fb.photoURL ?? undefined,
+    role: 'creator', // signed-in users get creator access (upload + dashboard)
+    emailVerified: fb.emailVerified,
+  };
+}
 
 export const useAuthStore = create<AuthState>()(
   persist(
-    (set, get) => ({
+    (set) => ({
       user: null,
-      accessToken: null,
       isLoading: false,
       error: null,
 
-      login: async (email, password, mfaCode) => {
+      signInWithGoogle: async () => {
         set({ isLoading: true, error: null });
-        try {
-          const res = await fetch(`${API_URL}/auth/login`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email, password, mfaCode }),
-            credentials: 'include',
+        const auth = getFirebaseAuth();
+        // Fallback: no Firebase config yet → demo sign-in so the button still works
+        if (!auth || !isFirebaseConfigured) {
+          set({
+            user: {
+              id: 'demo-user',
+              email: 'demo@safestream.app',
+              username: 'demo_user',
+              displayName: 'Demo User',
+              avatarUrl: 'https://ui-avatars.com/api/?name=Demo+User&background=6366f1&color=fff',
+              role: 'creator',
+              emailVerified: true,
+            },
+            isLoading: false,
           });
-          const data = await res.json() as { success: boolean; data?: { accessToken: string; user: User }; error?: { message: string } };
-          if (!res.ok) throw new Error(data.error?.message ?? 'Login failed');
-          set({ user: data.data!.user, accessToken: data.data!.accessToken, isLoading: false });
-        } catch (err) {
-          set({ error: err instanceof Error ? err.message : 'Login failed', isLoading: false });
+          return;
+        }
+        try {
+          const result = await signInWithPopup(auth, googleProvider);
+          set({ user: mapFirebaseUser(result.user), isLoading: false });
+        } catch (err: unknown) {
+          const code = (err as { code?: string })?.code ?? '';
+          const msg =
+            code === 'auth/popup-closed-by-user'
+              ? 'Sign-in cancelled.'
+              : code === 'auth/unauthorized-domain'
+                ? 'This domain is not authorized in Firebase. Add it under Authentication → Settings → Authorized domains.'
+                : (err instanceof Error ? err.message : 'Google sign-in failed');
+          set({ error: msg, isLoading: false });
           throw err;
         }
       },
 
-      register: async (formData) => {
-        set({ isLoading: true, error: null });
-        try {
-          const res = await fetch(`${API_URL}/auth/register`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(formData),
-          });
-          const data = await res.json() as { success: boolean; error?: { message: string } };
-          if (!res.ok) throw new Error(data.error?.message ?? 'Registration failed');
-          set({ isLoading: false });
-        } catch (err) {
-          set({ error: err instanceof Error ? err.message : 'Registration failed', isLoading: false });
-          throw err;
-        }
-      },
+      signInDemo: () =>
+        set({
+          user: {
+            id: 'demo-user',
+            email: 'demo@safestream.app',
+            username: 'demo_user',
+            displayName: 'Demo User',
+            avatarUrl: 'https://ui-avatars.com/api/?name=Demo+User&background=6366f1&color=fff',
+            role: 'creator',
+            emailVerified: true,
+          },
+          error: null,
+        }),
 
       logout: async () => {
-        const token = get().accessToken;
-        if (token) {
-          await fetch(`${API_URL}/auth/logout`, {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${token}` },
-            credentials: 'include',
-          }).catch(() => {});
-        }
-        set({ user: null, accessToken: null });
+        const auth = getFirebaseAuth();
+        if (auth) await fbSignOut(auth).catch(() => {});
+        set({ user: null });
       },
 
-      refreshTokens: async () => {
-        try {
-          const res = await fetch(`${API_URL}/auth/refresh`, {
-            method: 'POST',
-            credentials: 'include',
-          });
-          if (!res.ok) return false;
-          const data = await res.json() as { success: boolean; data?: { accessToken: string; user: User } };
-          if (data.data) {
-            set({ accessToken: data.data.accessToken, user: data.data.user });
-            return true;
-          }
-          return false;
-        } catch {
-          return false;
-        }
+      initAuth: () => {
+        const auth = getFirebaseAuth();
+        if (!auth) return;
+        onAuthStateChanged(auth, (fb) => {
+          if (fb) set({ user: mapFirebaseUser(fb) });
+        });
       },
 
-      setUser: (user) => set({ user }),
       clearError: () => set({ error: null }),
     }),
     {
       name: 'safestream-auth',
-      partialize: (state) => ({ user: state.user, accessToken: state.accessToken }),
+      partialize: (state) => ({ user: state.user }),
     },
   ),
 );

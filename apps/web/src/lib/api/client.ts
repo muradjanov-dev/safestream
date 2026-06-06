@@ -1,4 +1,17 @@
-import { useAuthStore } from '@/stores/auth.store';
+// Frontend runs without a backend: these APIs serve synthetic data from
+// mock-data.ts plus any videos the user "uploads" (persisted to localStorage).
+
+import {
+  getVideos,
+  getTrending,
+  getShorts,
+  getByCategory,
+  getVideoById,
+  getRelated,
+  getComments,
+  getChannelByHandle,
+  mockChannels,
+} from '@/lib/mock-data';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -85,138 +98,135 @@ export interface ChannelAnalytics {
   topVideos: Array<{ id: string; title: string; viewCount: number }>;
 }
 
-// ── HTTP client ───────────────────────────────────────────────────────────────
+// ── helpers ──────────────────────────────────────────────────────────────────
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api/v1';
+const delay = (ms = 150) => new Promise((r) => setTimeout(r, ms));
+const page = <T>(items: T[]): Paginated<T> => ({ items, total: items.length, hasMore: false });
 
-class ApiError extends Error {
-  constructor(
-    public code: string,
-    message: string,
-    public status: number,
-  ) {
-    super(message);
-    this.name = 'ApiError';
+const UPLOADS_KEY = 'safestream-uploads';
+
+export function getUploadedVideos(): Video[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    return JSON.parse(localStorage.getItem(UPLOADS_KEY) ?? '[]') as Video[];
+  } catch {
+    return [];
   }
 }
 
-async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-  const token = useAuthStore.getState().accessToken;
-
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...(options.headers as Record<string, string>),
-  };
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-
-  const res = await fetch(`${API_URL}${endpoint}`, { ...options, headers });
-
-  if (res.status === 401) {
-    const refreshed = await useAuthStore.getState().refreshTokens();
-    if (refreshed) {
-      headers['Authorization'] = `Bearer ${useAuthStore.getState().accessToken}`;
-      const retry = await fetch(`${API_URL}${endpoint}`, { ...options, headers });
-      if (retry.ok) return retry.json() as Promise<T>;
-    }
-    useAuthStore.getState().logout();
-    throw new ApiError('UNAUTHORIZED', 'Session expired', 401);
-  }
-
-  if (!res.ok) {
-    const body = (await res.json().catch(() => ({}))) as {
-      error?: { code?: string; message?: string };
-    };
-    throw new ApiError(
-      body.error?.code ?? 'API_ERROR',
-      body.error?.message ?? 'Request failed',
-      res.status,
-    );
-  }
-
-  return res.json() as Promise<T>;
+export function saveUploadedVideo(v: Video) {
+  if (typeof window === 'undefined') return;
+  const all = getUploadedVideos();
+  localStorage.setItem(UPLOADS_KEY, JSON.stringify([v, ...all]));
 }
 
-export const api = {
-  get:    <T>(url: string) => request<T>(url, { method: 'GET' }),
-  post:   <T>(url: string, body?: unknown) => request<T>(url, { method: 'POST', body: JSON.stringify(body) }),
-  patch:  <T>(url: string, body?: unknown) => request<T>(url, { method: 'PATCH', body: JSON.stringify(body) }),
-  delete: <T>(url: string) => request<T>(url, { method: 'DELETE' }),
-};
+function withUploads(list: Video[]): Video[] {
+  const uploads = getUploadedVideos();
+  if (!uploads.length) return list;
+  return [...uploads, ...list];
+}
 
-// ── Domain APIs ───────────────────────────────────────────────────────────────
+// ── Domain APIs (mock-backed) ─────────────────────────────────────────────────
 
 export const videosApi = {
-  list:        (params?: Record<string, string>) =>
-    api.get<Paginated<Video>>(`/videos?${new URLSearchParams(params)}`),
-  getOne:      (id: string) => api.get<{ success: boolean; data: Video }>(`/videos/${id}`),
-  mine:        () => api.get<Paginated<Video>>('/videos/mine'),
-  related:     (id: string) => api.get<Paginated<Video>>(`/videos/${id}/related`),
-  trending:    () => api.get<Paginated<Video>>('/videos/trending'),
-  recordView:  (id: string, data: { watchedSeconds?: number }) => api.post(`/videos/${id}/view`, data),
-  like:        (id: string) => api.post(`/videos/${id}/like`),
-  dislike:     (id: string) => api.post(`/videos/${id}/dislike`),
-  save:        (id: string) => api.post(`/videos/${id}/save`),
-  report:      (id: string, reason: string) => api.post(`/videos/${id}/report`, { reason }),
-  initUpload: (body: {
-    fileName: string;
-    fileSize: number;
-    mimeType: string;
-    title: string;
-    description?: string;
-    tags?: string[];
-    visibility: string;
-    videoType: string;
-  }) =>
-    api.post<{ uploadId: string; videoId: string; presignedUrls: string[] }>(
-      '/videos/upload/init',
-      body,
-    ),
-  completeUpload: (body: {
-    videoId: string;
-    uploadId: string;
-    parts: Array<{ partNumber: number; etag: string }>;
-  }) => api.post('/videos/upload/complete', body),
+  list:     async () => page(withUploads(getVideos())),
+  getOne:   async (id: string) => {
+    const v = getUploadedVideos().find((x) => x.id === id) ?? getVideoById(id);
+    return { success: true, data: v as Video };
+  },
+  mine:     async () => page(getUploadedVideos()),
+  related:  async (id: string) => { await delay(); return page(getRelated(id)); },
+  trending: async () => page(getTrending()),
+  recordView: async (_id: string, _data?: { watchedSeconds?: number }) => ({ success: true }),
+  like:     async (_id?: string) => ({ success: true }),
+  dislike:  async (_id?: string) => ({ success: true }),
+  save:     async (_id?: string) => ({ success: true }),
+  report:   async (_id?: string, _reason?: string) => ({ success: true }),
+  initUpload: async (_body: {
+    fileName: string; fileSize: number; mimeType: string;
+    title: string; description?: string; tags?: string[];
+    visibility: string; videoType: string;
+  }) => {
+    await delay();
+    return { uploadId: 'mock-' + Date.now(), videoId: 'up-' + Date.now(), presignedUrls: ['mock://part1'] };
+  },
+  completeUpload: async () => ({ success: true }),
 };
 
 export const feedApi = {
-  home:          (cursor?: string) =>
-    api.get<Paginated<Video>>(`/feed/home${cursor ? `?cursor=${cursor}` : ''}`),
-  trending:      (category?: string) =>
-    api.get<Paginated<Video>>(`/feed/trending${category ? `?category=${category}` : ''}`),
-  shorts:        () => api.get<Paginated<Video>>('/feed/shorts'),
-  subscriptions: () => api.get<Paginated<Video>>('/feed/subscriptions'),
-  explore:       (category: string) =>
-    api.get<Paginated<Video>>(`/feed/explore?category=${category}`),
+  home:          async (_cursor?: string) => { await delay(); return page(withUploads(getVideos())); },
+  trending:      async () => page(getTrending()),
+  shorts:        async () => page(getShorts()),
+  subscriptions: async () => page(getVideos().slice(0, 8)),
+  explore:       async (category: string) => page(getByCategory(category)),
 };
 
 export const channelsApi = {
-  getOne:       (handle: string) =>
-    api.get<{ success: boolean; data: Channel }>(`/channels/${handle}`),
-  getMine:      () => api.get<{ success: boolean; data: Channel }>('/channels/mine'),
-  getAnalytics: (id: string) => api.get<ChannelAnalytics>(`/channels/${id}/analytics`),
-  subscribe:    (id: string) => api.post(`/channels/${id}/subscribe`),
-  unsubscribe:  (id: string) => api.delete(`/channels/${id}/subscribe`),
+  getOne:       async (handle: string) => ({ success: true, data: getChannelByHandle(handle) as Channel }),
+  getMine:      async () => ({ success: true, data: mockChannels[0] }),
+  getAnalytics: async (_channelId?: string): Promise<ChannelAnalytics> => ({
+    viewsLast30Days: 45230,
+    watchTimeSeconds: 1820000,
+    newSubscribers: 1240,
+    topVideos: getTrending().slice(0, 3).map((v) => ({ id: v.id, title: v.title, viewCount: v.viewCount })),
+  }),
+  subscribe:    async () => ({ success: true }),
+  unsubscribe:  async () => ({ success: true }),
 };
 
+const COMMENTS_KEY = 'safestream-comments';
+
+function getPersistedUser(): { id: string; username: string; displayName?: string; avatarUrl?: string } | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = JSON.parse(localStorage.getItem('safestream-auth') ?? '{}');
+    return raw?.state?.user ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function getUserComments(videoId: string): VideoComment[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const all = JSON.parse(localStorage.getItem(COMMENTS_KEY) ?? '{}') as Record<string, VideoComment[]>;
+    return all[videoId] ?? [];
+  } catch {
+    return [];
+  }
+}
+
 export const commentsApi = {
-  list:   (videoId: string, parentId?: string) =>
-    api.get<Paginated<VideoComment>>(
-      `/videos/${videoId}/comments${parentId ? `?parentId=${parentId}` : ''}`,
-    ),
-  create: (videoId: string, content: string, parentId?: string) =>
-    api.post(`/videos/${videoId}/comments`, { content, parentId }),
-  delete: (videoId: string, id: string) =>
-    api.delete(`/videos/${videoId}/comments/${id}`),
+  list:   async (videoId: string) => { await delay(); return page([...getUserComments(videoId), ...getComments(videoId)]); },
+  create: async (videoId: string, content: string) => {
+    if (typeof window === 'undefined') return { success: true };
+    const user = getPersistedUser();
+    const comment: VideoComment = {
+      id: `${videoId}-u${Date.now()}`,
+      content,
+      userId: user?.id ?? 'you',
+      videoId,
+      likeCount: 0,
+      replyCount: 0,
+      isPinned: false,
+      createdAt: new Date().toISOString(),
+      user: {
+        id: user?.id ?? 'you',
+        username: user?.username ?? 'you',
+        displayName: user?.displayName ?? 'You',
+        avatarUrl: user?.avatarUrl ?? null,
+      },
+    };
+    const all = JSON.parse(localStorage.getItem(COMMENTS_KEY) ?? '{}') as Record<string, VideoComment[]>;
+    all[videoId] = [comment, ...(all[videoId] ?? [])];
+    localStorage.setItem(COMMENTS_KEY, JSON.stringify(all));
+    return { success: true };
+  },
+  delete: async (_id?: string) => ({ success: true }),
 };
 
 export const conversationsApi = {
-  list: () => api.get<Paginated<Conversation>>('/conversations'),
-  create: (participantIds: string[], type: 'direct' | 'group', name?: string) =>
-    api.post<{ success: boolean; data: Conversation }>('/conversations', {
-      participantIds,
-      type,
-      name,
-    }),
-  messages: (id: string, page = 1) =>
-    api.get<Paginated<Message>>(`/conversations/${id}/messages?page=${page}`),
+  list:     async () => page<Conversation>([]),
+  create:   async (_data?: unknown) => ({ success: true, data: {} as Conversation }),
+  messages: async (_conversationId?: string) => page<Message>([]),
 };
