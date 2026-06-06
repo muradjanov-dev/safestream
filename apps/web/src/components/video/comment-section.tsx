@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/stores/auth.store';
+import { useCountersStore } from '@/stores/counters.store';
 import { commentsApi } from '@/lib/api/client';
 import { timeAgo, cn } from '@/lib/utils';
 import { ThumbsUp } from 'lucide-react';
@@ -22,6 +23,7 @@ export function CommentSection({ videoId }: { videoId: string }) {
   const { user } = useAuthStore();
   const router = useRouter();
   const qc = useQueryClient();
+  const bumpVideo = useCountersStore((s) => s.bumpVideo);
   const [text, setText] = useState('');
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [replyText, setReplyText] = useState('');
@@ -36,6 +38,7 @@ export function CommentSection({ videoId }: { videoId: string }) {
     mutationFn: ({ content, parentId }: { content: string; parentId?: string }) =>
       commentsApi.create(videoId, content, parentId),
     onSuccess: () => {
+      bumpVideo(videoId, 'commentCount', 1);
       qc.invalidateQueries({ queryKey: ['comments', videoId] });
       setText(''); setReplyText(''); setReplyingTo(null);
     },

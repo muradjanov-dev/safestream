@@ -22,7 +22,7 @@ export const mockChannels: Channel[] = [
   { id: 'ch-math', handle: 'mathwiz', name: 'Math Made Easy', description: 'Algebra, geometry, calculus and statistics explained clearly with visual animations.', avatarUrl: avatar('Math Wizard', '8b5cf6'), bannerUrl: thumb('mathbanner'), subscriberCount: 89000, totalVideos: 2, isVerified: true, categories: ['education', 'science'] },
   { id: 'ch-melody', handle: 'melodymakers', name: 'Melody Makers', description: 'Family-friendly music lessons, instrument tutorials and sing-alongs.', avatarUrl: avatar('Melody Makers', 'f43f5e'), bannerUrl: thumb('melodybanner'), subscriberCount: 156000, totalVideos: 2, isVerified: true, categories: ['music'] },
   { id: 'ch-pixel', handle: 'pixelplay', name: 'PixelPlay Kids Gaming', description: 'Safe, ad-free gaming walkthroughs and tips suitable for young players.', avatarUrl: avatar('Pixel Play', '0ea5e9'), bannerUrl: thumb('pixelbanner'), subscriberCount: 198000, totalVideos: 2, isVerified: true, categories: ['gaming'] },
-];
+].map((c) => ({ ...c, subscriberCount: 0 }));
 
 const channelById = Object.fromEntries(mockChannels.map((c) => [c.id, c]));
 
@@ -65,8 +65,6 @@ const seeds: Seed[] = [
 function buildVideo(s: Seed): Video & { category: string } {
   const ch = channelById[s.ch]!;
   const publishedAt = new Date(Date.now() - s.days * 86400000).toISOString();
-  const ageHours = s.days * 24;
-  const trendingScore = (s.views * 1 + s.likes * 3 + s.comments * 5) * Math.exp(-ageHours / 168);
   return {
     id: s.id,
     title: s.title,
@@ -74,9 +72,9 @@ function buildVideo(s: Seed): Video & { category: string } {
     thumbnailUrl: thumb(s.id),
     hlsManifestUrl: s.hls ?? HLS,
     durationSeconds: s.dur,
-    viewCount: s.views,
-    likeCount: s.likes,
-    commentCount: s.comments,
+    viewCount: 0,
+    likeCount: 0,
+    commentCount: 0,
     channelId: s.ch,
     channel: { id: ch.id, name: ch.name, handle: ch.handle, avatarUrl: ch.avatarUrl },
     videoType: s.type,
@@ -84,7 +82,7 @@ function buildVideo(s: Seed): Video & { category: string } {
     publishedAt,
     createdAt: publishedAt,
     tags: s.tags,
-    trendingScore,
+    trendingScore: 0,
     // extra field used for category filtering
     ...( { category: s.cat } as object ),
   } as Video & { category: string };
@@ -127,6 +125,49 @@ export function searchVideos(q: string): Video[] {
 }
 export function getChannelByHandle(handle: string): Channel | undefined {
   return mockChannels.find((c) => c.handle === handle);
+}
+
+// ── Recommendation algorithm ──────────────────────────────────────────────────
+// Builds a taste profile from what the user liked / watched / subscribed to,
+// then ranks videos by how well they match it.
+export interface Preference {
+  categories: Record<string, number>;
+  tags: Record<string, number>;
+  channels: Set<string>;
+}
+
+export function buildPreference(likedIds: string[], historyIds: string[], subscribedChannelIds: string[]): Preference {
+  const categories: Record<string, number> = {};
+  const tags: Record<string, number> = {};
+  const consider = (id: string, weight: number) => {
+    const v = getVideoById(id) as (Video & { category?: string }) | undefined;
+    if (!v) return;
+    if (v.category) categories[v.category] = (categories[v.category] ?? 0) + weight;
+    for (const t of v.tags) tags[t] = (tags[t] ?? 0) + weight;
+  };
+  likedIds.forEach((id) => consider(id, 3));
+  historyIds.forEach((id) => consider(id, 1));
+  return { categories, tags, channels: new Set(subscribedChannelIds) };
+}
+
+function preferenceScore(v: Video, pref: Preference): number {
+  let score = 0;
+  const cat = (v as Video & { category?: string }).category;
+  if (cat && pref.categories[cat]) score += pref.categories[cat] * 3;
+  for (const t of v.tags) if (pref.tags[t]) score += pref.tags[t];
+  if (pref.channels.has(v.channelId)) score += 6;
+  return score;
+}
+
+export function hasPreference(pref: Preference): boolean {
+  return Object.keys(pref.categories).length > 0 || Object.keys(pref.tags).length > 0 || pref.channels.size > 0;
+}
+
+export function rankByPreference(videos: Video[], pref: Preference): Video[] {
+  return videos
+    .map((v, i) => ({ v, i, s: preferenceScore(v, pref) }))
+    .sort((a, b) => (b.s - a.s) || (a.i - b.i)) // stable: keep original order on ties
+    .map((x) => x.v);
 }
 
 const COMMENT_AUTHORS = [

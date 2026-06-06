@@ -3,7 +3,7 @@
 
 import {
   collection, doc, setDoc, deleteDoc, getDoc, getDocs, addDoc,
-  query, orderBy, where, onSnapshot, serverTimestamp, limit,
+  query, orderBy, where, onSnapshot, serverTimestamp, limit, increment,
 } from 'firebase/firestore';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { getDb, getStorageInstance } from '@/lib/firestore';
@@ -111,29 +111,36 @@ export async function uploadVideoFile(
   onProgress: (pct: number) => void,
 ): Promise<Video> {
   const db = getDb();
-  const storage = getStorageInstance();
-  if (!db || !storage) throw new Error('Firebase not configured');
+  if (!db) throw new Error('Firebase not configured');
 
   const id = `up-${Date.now()}`;
   const DEMO_HLS = 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8';
 
-  // Try to upload the real file to Storage (needs Blaze plan). Fall back to a
-  // demo stream if Storage isn't available, but always persist metadata.
+  // Try uploading the real file to Storage with a hard timeout so it can never
+  // hang (Storage needs the Blaze plan). On any failure/timeout, fall back to a
+  // demo stream — but the video metadata always persists to Firestore.
   let fileUrl = DEMO_HLS;
-  try {
-    const path = `videos/${owner.id}/${id}-${file.name}`;
-    const task = uploadBytesResumable(ref(storage, path), file, { contentType: file.type });
-    fileUrl = await new Promise<string>((resolve, reject) => {
-      task.on(
-        'state_changed',
-        (snap) => onProgress(Math.round((snap.bytesTransferred / snap.totalBytes) * 95)),
-        reject,
-        async () => resolve(await getDownloadURL(task.snapshot.ref)),
-      );
-    });
-  } catch {
-    // Storage unavailable (e.g. Spark plan) — simulate progress, use demo stream
-    for (let p = 20; p <= 95; p += 15) { await new Promise((r) => setTimeout(r, 120)); onProgress(p); }
+  const storage = getStorageInstance();
+  if (storage) {
+    try {
+      const path = `videos/${owner.id}/${id}-${file.name}`;
+      const task = uploadBytesResumable(ref(storage, path), file, { contentType: file.type });
+      fileUrl = await Promise.race([
+        new Promise<string>((resolve, reject) => {
+          task.on(
+            'state_changed',
+            (snap) => onProgress(Math.min(90, Math.round((snap.bytesTransferred / snap.totalBytes) * 90))),
+            reject,
+            async () => resolve(await getDownloadURL(task.snapshot.ref)),
+          );
+        }),
+        new Promise<string>((_, reject) => setTimeout(() => { task.cancel(); reject(new Error('timeout')); }, 8000)),
+      ]);
+    } catch {
+      for (let p = 30; p <= 90; p += 20) { await new Promise((r) => setTimeout(r, 100)); onProgress(p); }
+    }
+  } else {
+    for (let p = 30; p <= 90; p += 20) { await new Promise((r) => setTimeout(r, 100)); onProgress(p); }
   }
 
   const now = new Date().toISOString();
@@ -215,6 +222,33 @@ export async function deleteVideoDoc(id: string) {
   const db = getDb();
   if (!db) return;
   await deleteDoc(doc(db, 'videos', id));
+}
+
+// ── Global counters (views / likes / dislikes / comments / subscribers) ────────
+// Stored in one doc so the whole feed's counts load in a single read.
+export interface CountersDoc {
+  videos: Record<string, { viewCount?: number; likeCount?: number; dislikeCount?: number; commentCount?: number }>;
+  channels: Record<string, { subscriberCount?: number }>;
+}
+
+export async function getCounters(): Promise<CountersDoc> {
+  const db = getDb();
+  if (!db) return { videos: {}, channels: {} };
+  const d = await getDoc(doc(db, 'stats', 'counters'));
+  const data = (d.exists() ? d.data() : {}) as Partial<CountersDoc>;
+  return { videos: data.videos ?? {}, channels: data.channels ?? {} };
+}
+
+export async function bumpVideoStat(videoId: string, field: 'viewCount' | 'likeCount' | 'dislikeCount' | 'commentCount', delta: number) {
+  const db = getDb();
+  if (!db) return;
+  await setDoc(doc(db, 'stats', 'counters'), { videos: { [videoId]: { [field]: increment(delta) } } }, { merge: true });
+}
+
+export async function bumpChannelStat(channelId: string, delta: number) {
+  const db = getDb();
+  if (!db) return;
+  await setDoc(doc(db, 'stats', 'counters'), { channels: { [channelId]: { subscriberCount: increment(delta) } } }, { merge: true });
 }
 
 // ── Messaging ─────────────────────────────────────────────────────────────────

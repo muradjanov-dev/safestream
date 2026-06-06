@@ -1,11 +1,15 @@
+'use client';
+
 import Link from 'next/link';
 import Image from 'next/image';
 import { formatDuration, formatViewCount, timeAgo } from '@/lib/utils';
+import { useCountersStore } from '@/stores/counters.store';
 import type { Video } from '@/lib/api/client';
 
 interface Props { video: Video }
 
 export function VideoCard({ video }: Props) {
+  const views = useCountersStore((s) => s.videos[video.id]?.viewCount ?? video.viewCount ?? 0);
   return (
     <Link href={`/watch/${video.id}`} className="group block space-y-2">
       <div className="relative aspect-video bg-muted rounded-lg overflow-hidden">
@@ -33,7 +37,7 @@ export function VideoCard({ video }: Props) {
           {video.title}
         </h3>
         <div className="flex items-center gap-1 mt-1 text-xs text-muted-foreground">
-          <span>{formatViewCount(video.viewCount)} views</span>
+          <span>{formatViewCount(views)} views</span>
           {video.publishedAt && <><span>·</span><span>{timeAgo(video.publishedAt)}</span></>}
         </div>
       </div>

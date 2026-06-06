@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { useAuthStore } from '@/stores/auth.store';
 import { useInteractionsStore } from '@/stores/interactions.store';
+import { useCountersStore } from '@/stores/counters.store';
 import { useFirestore } from '@/lib/firestore';
 import { upsertUser } from '@/lib/data/firestore-data';
 
@@ -21,6 +22,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     // Restore Firebase session (if configured) and saved theme
     useAuthStore.getState().initAuth();
+    void useCountersStore.getState().load();
     if (localStorage.getItem('safestream-theme') === 'dark') {
       document.documentElement.classList.add('dark');
     }

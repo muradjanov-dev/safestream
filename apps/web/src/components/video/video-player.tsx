@@ -5,6 +5,7 @@ import Hls from 'hls.js';
 import { useQuery } from '@tanstack/react-query';
 import { videosApi } from '@/lib/api/client';
 import { useInteractionsStore } from '@/stores/interactions.store';
+import { useCountersStore } from '@/stores/counters.store';
 
 interface Props { videoId: string }
 
@@ -13,6 +14,7 @@ export function VideoPlayer({ videoId }: Props) {
   const hlsRef = useRef<Hls | null>(null);
   const [error, setError] = useState(false);
   const addHistory = useInteractionsStore((s) => s.addHistory);
+  const bumpVideo = useCountersStore((s) => s.bumpVideo);
 
   const { data } = useQuery({
     queryKey: ['video', videoId],
@@ -58,6 +60,7 @@ export function VideoPlayer({ videoId }: Props) {
     const handler = () => {
       if (!recorded && el.currentTime >= 5) {
         recorded = true;
+        bumpVideo(videoId, 'viewCount', 1);
         void videosApi.recordView(videoId, { watchedSeconds: Math.floor(el.currentTime) });
       }
     };
